@@ -1,0 +1,116 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SSE Decryption Progress Demo</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+
+    .bar-container {
+      width: 100%; background: #eee; border-radius: 5px; margin-top: 10px;
+    }
+    .bar {
+      height: 20px; width: 0%; background: green; border-radius: 5px;
+      transition: width 0.5s ease;
+    }
+
+    #status { margin-top: 10px; font-weight: bold; }
+    #message { margin-top: 5px; font-style: italic; }
+
+    button {
+      margin: 5px 5px 10px 0;
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+
+    /* Norman-style notification */
+    #norman {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: #333;
+      color: white;
+      padding: 12px 18px;
+      border-radius: 5px;
+      display: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body>
+  <h2>🔐 Decryption Progress</h2>
+  <button onclick="startDecryption()">Start Decryption</button>
+  <button onclick="reset()">Reset</button>
+
+  <div class="bar-container">
+    <div class="bar" id="progress-bar"></div>
+  </div>
+
+  <p id="status">Status: Idle</p>
+  <p id="message"></p>
+
+  <div id="norman"></div>
+
+  <script>
+    let source = null;
+
+    function startDecryption() {
+      reset(); // clear first
+      const bar = document.getElementById('progress-bar');
+      const status = document.getElementById('status');
+      const message = document.getElementById('message');
+
+      source = new EventSource('/sse-progress');
+
+      source.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.complete) {
+            bar.style.width = '100%';
+            status.textContent = '✅ Decryption Complete!';
+            showNorman('🎉 File ready to download!');
+            source.close();
+          } else {
+            const progress = data.progress;
+            const msg = data.message;
+
+            bar.style.width = `${progress}%`;
+            status.textContent = `Status: In Progress (${progress}%)`;
+            message.textContent = msg;
+            showNorman(msg);
+          }
+        } catch (err) {
+          console.error('Invalid JSON from server:', event.data);
+        }
+      };
+
+      source.onerror = function() {
+        status.textContent = '❌ Connection error';
+        showNorman('Error: Unable to connect to server');
+        source.close();
+      };
+    }
+
+    function reset() {
+      const bar = document.getElementById('progress-bar');
+      const status = document.getElementById('status');
+      const message = document.getElementById('message');
+      bar.style.width = '0%';
+      status.textContent = 'Status: Idle';
+      message.textContent = '';
+      if (source) source.close();
+    }
+
+    function showNorman(text) {
+      const norman = document.getElementById('norman');
+      norman.textContent = text;
+      norman.style.display = 'block';
+      setTimeout(() => {
+        norman.style.display = 'none';
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
