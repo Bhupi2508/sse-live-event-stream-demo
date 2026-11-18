@@ -1,116 +1,117 @@
-<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>SSE Decryption Progress Demo</title>
-  <style>
-    body { font-family: sans-serif; padding: 20px; }
-
-    .bar-container {
-      width: 100%; background: #eee; border-radius: 5px; margin-top: 10px;
-    }
-    .bar {
-      height: 20px; width: 0%; background: green; border-radius: 5px;
-      transition: width 0.5s ease;
-    }
-
-    #status { margin-top: 10px; font-weight: bold; }
-    #message { margin-top: 5px; font-style: italic; }
-
-    button {
-      margin: 5px 5px 10px 0;
-      padding: 8px 16px;
-      font-size: 14px;
-    }
-
-    /* Norman-style notification */
-    #norman {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      background: #333;
-      color: white;
-      padding: 12px 18px;
-      border-radius: 5px;
-      display: none;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SSE Live Streaming Demo</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h2>🔐 Decryption Progress</h2>
-  <button onclick="startDecryption()">Start Decryption</button>
-  <button onclick="reset()">Reset</button>
+  <header class="page-header">
+    <h1>Server-Sent Events, live</h1>
+    <p><strong>Connect once</strong>, then publish as many events as you like. Every event arrives over that
+      <strong>same open HTTP connection</strong>. The browser never asks again.</p>
+  </header>
 
-  <div class="bar-container">
-    <div class="bar" id="progress-bar"></div>
-  </div>
+  <!-- ============ Event journey: Producer → Backend → SSE Stream → Consumer ============ -->
+  <section class="card journey-card" aria-labelledby="journey-title">
+    <h2 id="journey-title" class="visually-hidden">Event journey</h2>
+    <div class="journey" id="journey">
+      <div class="node" id="node-producer">
+        <span class="node-step">1</span>
+        <strong>Producer</strong>
+        <code>POST /publish</code>
+      </div>
+      <div class="link" id="link-1"><span class="link-label">HTTP request</span></div>
+      <div class="node" id="node-backend">
+        <span class="node-step">2</span>
+        <strong>Backend</strong>
+        <code>EventEmitter</code>
+      </div>
+      <div class="link" id="link-2"><span class="link-label">res.write()</span></div>
+      <div class="node" id="node-stream">
+        <span class="node-step">3</span>
+        <strong>SSE Stream</strong>
+        <code>GET /events (open)</code>
+      </div>
+      <div class="link pipe" id="link-3"><span class="link-label" id="pipe-label">no connection</span></div>
+      <div class="node" id="node-consumer">
+        <span class="node-step">4</span>
+        <strong>Consumer</strong>
+        <code>EventSource</code>
+      </div>
+    </div>
+    <p class="journey-caption" id="journey-caption" role="status">Step 1: click <strong>Connect</strong> to open the SSE stream.</p>
+  </section>
 
-  <p id="status">Status: Idle</p>
-  <p id="message"></p>
+  <main class="grid">
+    <!-- ================= Producer ================= -->
+    <section class="card" aria-labelledby="producer-title">
+      <div class="card-head">
+        <h2 id="producer-title">Producer</h2>
+        <span class="pill" id="auto-pill" hidden>Auto publishing</span>
+      </div>
+      <p class="hint">Sends a normal HTTP <code>POST</code>. The server pushes the event to every open SSE stream.</p>
 
-  <div id="norman"></div>
+      <label for="event-type">Event type</label>
+      <select id="event-type">
+        <option value="">Random</option>
+      </select>
 
-  <script>
-    let source = null;
+      <div class="row">
+        <button id="publish" type="button" class="primary">Publish event</button>
+        <button id="auto" type="button" aria-pressed="false">Start auto publish (2s)</button>
+      </div>
 
-    function startDecryption() {
-      reset(); // clear first
-      const bar = document.getElementById('progress-bar');
-      const status = document.getElementById('status');
-      const message = document.getElementById('message');
+      <details class="custom">
+        <summary>Custom JSON payload (optional)</summary>
+        <label for="payload">Payload (JSON object, max 4 KB). Used by “Publish event” when the box is ticked.</label>
+        <textarea id="payload" rows="6" spellcheck="false"></textarea>
+        <label class="check"><input type="checkbox" id="use-custom" /> Send this payload instead of mock data</label>
+      </details>
 
-      source = new EventSource('/sse-progress');
+      <dl class="stats">
+        <div><dt>Published (this tab)</dt><dd id="published">0</dd></div>
+        <div><dt>Delivered to</dt><dd id="delivered">–</dd></div>
+      </dl>
+      <p id="publish-result" class="result" role="status"></p>
+    </section>
 
-      source.onmessage = function(event) {
-        try {
-          const data = JSON.parse(event.data);
+    <!-- ================= Consumer ================= -->
+    <section class="card" aria-labelledby="consumer-title">
+      <div class="card-head">
+        <h2 id="consumer-title">Consumer</h2>
+        <span id="status" class="pill status-closed">Disconnected</span>
+      </div>
+      <p class="hint">One <code>EventSource</code> holds one long-lived <code>GET /api/stream/events</code> response open.</p>
 
-          if (data.complete) {
-            bar.style.width = '100%';
-            status.textContent = '✅ Decryption Complete!';
-            showNorman('🎉 File ready to download!');
-            source.close();
-          } else {
-            const progress = data.progress;
-            const msg = data.message;
+      <div class="row">
+        <button id="connect" type="button" class="primary">Connect</button>
+        <button id="disconnect" type="button">Disconnect</button>
+      </div>
 
-            bar.style.width = `${progress}%`;
-            status.textContent = `Status: In Progress (${progress}%)`;
-            message.textContent = msg;
-            showNorman(msg);
-          }
-        } catch (err) {
-          console.error('Invalid JSON from server:', event.data);
-        }
-      };
+      <dl class="stats stats-4">
+        <div class="stat-key"><dt>SSE connections opened</dt><dd id="connections">0</dd></div>
+        <div class="stat-key"><dt>Events received</dt><dd id="count">0</dd></div>
+        <div><dt>Last heartbeat</dt><dd id="heartbeat">–</dd></div>
+        <div><dt>Connected for</dt><dd id="uptime">–</dd></div>
+      </dl>
+      <p id="connection-message" class="result" role="status"></p>
 
-      source.onerror = function() {
-        status.textContent = '❌ Connection error';
-        showNorman('Error: Unable to connect to server');
-        source.close();
-      };
-    }
+      <div class="row space-between">
+        <h3>Incoming events <small>(newest first)</small></h3>
+        <button id="clear" type="button" class="small">Clear</button>
+      </div>
+      <ul id="events" class="events" aria-live="polite"></ul>
+      <p id="empty" class="empty">No events yet. Connect, then publish.</p>
+    </section>
+  </main>
 
-    function reset() {
-      const bar = document.getElementById('progress-bar');
-      const status = document.getElementById('status');
-      const message = document.getElementById('message');
-      bar.style.width = '0%';
-      status.textContent = 'Status: Idle';
-      message.textContent = '';
-      if (source) source.close();
-    }
+  <footer class="page-footer">
+    Tip: open a second tab. Both tabs receive every event, each over its own single connection.
+    Events are kept in server memory only, so a restart loses them.
+  </footer>
 
-    function showNorman(text) {
-      const norman = document.getElementById('norman');
-      norman.textContent = text;
-      norman.style.display = 'block';
-      setTimeout(() => {
-        norman.style.display = 'none';
-      }, 3000);
-    }
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
